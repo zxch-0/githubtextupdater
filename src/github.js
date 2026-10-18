@@ -5,6 +5,11 @@ import { logger } from './logger.js';
 const RETRY_STATUSES = new Set([500, 502, 503, 504]);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+/** Relative API paths are resolved against the configured GitHub API base. */
+function absoluteUrl(path) {
+  return String(path).startsWith('http') ? path : `${config.githubApiBase}${path}`;
+}
+
 function decodeBase64Utf8(b64) {
   const buf = Buffer.from(b64 || '', 'base64');
   // Reject anything that is not valid UTF-8 (binary files we cannot diff or edit safely).
@@ -116,7 +121,8 @@ export class GitHubClient {
   /** Follow `Link: <...>; rel="next"` up to maxPages. */
   async paginate(path, { perPage = 100, maxPages = 5 } = {}) {
     const out = [];
-    let url = `${path}${path.includes('?') ? '&' : '?'}per_page=${perPage}`;
+    const separator = path.includes('?') ? '&' : '?';
+    let url = `${absoluteUrl(path)}${separator}per_page=${perPage}`;
     for (let page = 0; page < maxPages; page += 1) {
       const { items, nextUrl } = await this.requestPage(url);
       out.push(...items);
@@ -127,7 +133,7 @@ export class GitHubClient {
   }
 
   async requestPage(url) {
-    const res = await fetch(url, {
+    const res = await fetch(absoluteUrl(url), {
       headers: {
         Accept: 'application/vnd.github+json',
         Authorization: `Bearer ${this.token}`,

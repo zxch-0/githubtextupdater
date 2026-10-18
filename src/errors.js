@@ -67,6 +67,9 @@ export function toAppError(err) {
       resetAt: err.resetAt,
     });
   }
+  if (status === 0) {
+    return new AppError(502, 'github_unavailable', `Could not reach GitHub (${err.message}).`);
+  }
   if (status === 401) return AppError.unauthorized('github_unauthorized', GITHUB_MESSAGES[401]);
   if (status === 403) return AppError.forbidden('github_forbidden', GITHUB_MESSAGES[403], { body: err.body });
   if (status === 404) return AppError.notFound('github_not_found', GITHUB_MESSAGES[404], { body: err.body });
