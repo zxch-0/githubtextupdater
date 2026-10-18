@@ -1,11 +1,12 @@
 /** Application error carrying an HTTP status + machine readable code for the UI. */
 export class AppError extends Error {
-  constructor(status, code, message, details) {
+  constructor(status, code, message, details, retryAfter) {
     super(message);
     this.name = 'AppError';
     this.status = status;
     this.code = code;
     this.details = details;
+    this.retryAfter = retryAfter;
   }
 
   static badRequest(code, message, details) {
@@ -28,14 +29,14 @@ export class AppError extends Error {
     return new AppError(409, code, message, details);
   }
 
-  static tooMany(code, message, details) {
-    return new AppError(429, code, message, details);
+  static tooMany(code, message, details, retryAfter) {
+    return new AppError(429, code, message, details, retryAfter);
   }
 }
 
 /** Error returned by the GitHub REST API. */
 export class GitHubError extends Error {
-  constructor(status, message, { code = 'github_error', body, docsUrl, resetAt } = {}) {
+  constructor(status, message, { code = 'github_error', body, docsUrl, resetAt, retryAfterSeconds } = {}) {
     super(message);
     this.name = 'GitHubError';
     this.status = status;
@@ -43,6 +44,7 @@ export class GitHubError extends Error {
     this.body = body;
     this.docsUrl = docsUrl;
     this.resetAt = resetAt;
+    this.retryAfterSeconds = retryAfterSeconds;
   }
 }
 
@@ -63,9 +65,14 @@ export function toAppError(err) {
   const status = err.status;
   if (err.code === 'rate_limited') {
     const when = err.resetAt ? new Date(err.resetAt).toUTCString() : 'soon';
-    return AppError.tooMany('github_rate_limited', `GitHub rate limit reached. Resets at ${when}.`, {
-      resetAt: err.resetAt,
-    });
+    const retryAfter =
+      err.retryAfterSeconds ?? (err.resetAt ? Math.max(1, Math.ceil((err.resetAt - Date.now()) / 1000)) : undefined);
+    return AppError.tooMany(
+      'github_rate_limited',
+      `GitHub rate limit reached. Resets at ${when}. Wait before retrying, or use a token with more quota.`,
+      { resetAt: err.resetAt },
+      retryAfter,
+    );
   }
   if (status === 0) {
     return new AppError(502, 'github_unavailable', `Could not reach GitHub (${err.message}).`);

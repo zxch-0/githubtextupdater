@@ -238,6 +238,7 @@ step 3 → uncheck what you do not want → Commit → Open PR → Merge.**
 | `GET/POST/DELETE` | `/api/session` | Current session / connect with a token / disconnect |
 | `GET` | `/api/repos?query=&page=` | Repositories you can push to |
 | `GET` | `/api/repos/:owner/:repo` | Repo metadata + branches |
+| `GET` | `/api/rate-limit` | Remaining GitHub quota for the connected token |
 | `GET` | `/api/repos/:owner/:repo/tree?ref=&query=` | File list (for the editor) |
 | `GET` | `/api/repos/:owner/:repo/file?ref=&path=` | Fetch an existing file |
 | `POST` | `/api/plan` | Parse + compare the block with the branch |
@@ -247,6 +248,24 @@ step 3 → uncheck what you do not want → Commit → Open PR → Merge.**
 | `POST` | `/api/pulls/:owner/:repo/:n/merge` | Merge it |
 
 Errors are returned as `{ "error": { "code", "message", "details" } }` with a meaningful HTTP status.
+
+---
+
+## Troubleshooting
+
+| Symptom | Meaning | What to do |
+| --- | --- | --- |
+| `HTTP 403 on GET /api/…` | GitHub refused the request. | Check the quota shown in step 1 (or `GET /api/rate-limit`): if it is exhausted, wait for the reset. Otherwise the token lacks **Contents/Pull requests** write permission on that repo, or the organisation requires **SSO authorisation** for the token. |
+| `Too many requests` (429) | Primary or secondary GitHub rate limit. | Wait the announced delay (a `Retry-After` header is sent) and retry. Each page refresh only costs a few calls; the heaviest operation is the plan (one tree + one blob per file). |
+| `HTTP 502/503/504` | The Render instance is waking up or GitHub is unavailable. | The UI retries automatically twice. On the free plan the first request after ~15 min of inactivity can take 30-60 s. |
+| `HTTP 401` / session lost | The token was revoked, the session expired after 8 h, or `SESSION_SECRET` changed. | Reconnect in step 1. Never regenerate `SESSION_SECRET` unless you want to log everyone out. |
+| `Nothing to commit` | Every file is already identical on the target branch. | Expected: the block is idempotent. Change the content or the branch. |
+| `SEARCH block not found` | The `action=patch` block does not match the file byte for byte. | Use **Edit an existing file…** to copy the exact lines (indentation included). |
+| `The file already exists` with `action=create` | Safety net against overwriting. | Use `upsert`, or `update` to rewrite it. |
+
+Every error message now contains the HTTP status, the endpoint called and — when the answer is not
+JSON — a snippet of the raw body, so a response coming from the host (Render) instead of the app is
+immediately visible.
 
 ---
 

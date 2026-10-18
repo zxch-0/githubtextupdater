@@ -105,3 +105,83 @@ test('known GitHub statuses keep their friendly wording', () => {
   assert.equal(toAppError(new GitHubError(403, 'Forbidden')).status, 403);
   assert.equal(toAppError(new GitHubError(422, "Validation Failed")).status, 400);
 });
+
+test('a 403 that is a primary rate limit is reported as 429', async () => {
+  await withFetch(
+    () =>
+      new Response(JSON.stringify({ message: 'API rate limit exceeded for user ID 1.' }), {
+        status: 403,
+        headers: {
+          'content-type': 'application/json',
+          'x-ratelimit-remaining': '0',
+          'x-ratelimit-reset': String(Math.floor(Date.now() / 1000) + 120),
+        },
+      }),
+    async () => {
+      const client = new GitHubClient('ghp_testtoken');
+      let thrown = null;
+      try {
+        await client.whoami();
+      } catch (err) {
+        thrown = err;
+      }
+      assert.ok(thrown, 'expected the call to fail');
+      assert.equal(thrown.code, 'rate_limited');
+      assert.ok(thrown.resetAt > Date.now());
+
+      const app = toAppError(thrown);
+      assert.equal(app.status, 429);
+      assert.equal(app.code, 'github_rate_limited');
+      assert.ok(app.retryAfter >= 1, 'expected a Retry-After value');
+    },
+  );
+});
+
+test('a 403 secondary rate limit is detected even without x-ratelimit-remaining', async () => {
+  await withFetch(
+    () =>
+      new Response(
+        JSON.stringify({
+          message: 'You have exceeded a secondary rate limit and have been temporarily blocked from content creation.',
+        }),
+        { status: 403, headers: { 'content-type': 'application/json', 'retry-after': '60' } },
+      ),
+    async () => {
+      const client = new GitHubClient('ghp_testtoken');
+      let thrown = null;
+      try {
+        await client.listBranches('acme', 'widgets');
+      } catch (err) {
+        thrown = err;
+      }
+      assert.ok(thrown);
+      assert.equal(thrown.code, 'rate_limited');
+      assert.equal(thrown.retryAfterSeconds, 60);
+      assert.equal(toAppError(thrown).status, 429);
+    },
+  );
+});
+
+test('a plain 403 stays a 403 with the friendly wording', async () => {
+  await withFetch(
+    () =>
+      new Response(JSON.stringify({ message: 'Resource not accessible by integration' }), {
+        status: 403,
+        headers: { 'content-type': 'application/json' },
+      }),
+    async () => {
+      const client = new GitHubClient('ghp_testtoken');
+      let thrown = null;
+      try {
+        await client.getRepo('acme', 'widgets');
+      } catch (err) {
+        thrown = err;
+      }
+      assert.ok(thrown);
+      assert.equal(thrown.code, 'github_error');
+      const app = toAppError(thrown);
+      assert.equal(app.status, 403);
+      assert.match(app.message, /Contents.+Pull requests|permissions/);
+    },
+  );
+});
