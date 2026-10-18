@@ -38,6 +38,33 @@ export async function mapLimit(items, limit, worker) {
   return results;
 }
 
+/** Build the GitHubError for a non-2xx response (shared by request()/requestPage()). */
+function githubErrorFrom(res, data, { method, path }) {
+  const remaining = res.headers.get('x-ratelimit-remaining');
+  const reset = res.headers.get('x-ratelimit-reset');
+  const retryAfterHeader = res.headers.get('retry-after');
+  const lowerMessage = String(data?.message || '').toLowerCase();
+  // Primary (5000/h) and secondary (burst/abuse) limits both surface as a 403.
+  const isRateLimit =
+    res.status === 403 &&
+    ((remaining === '0' && lowerMessage.includes('rate limit')) ||
+      lowerMessage.includes('secondary rate limit') ||
+      lowerMessage.includes('abuse detection') ||
+      Boolean(retryAfterHeader));
+  const message =
+    data?.message || (isRateLimit ? 'GitHub API rate limit exceeded' : `GitHub returned HTTP ${res.status}`);
+  if (res.status === 403) {
+    logger.warn('github 403', { method, path, message, isRateLimit, remaining });
+  }
+  return new GitHubError(res.status, message, {
+    code: isRateLimit ? 'rate_limited' : 'github_error',
+    body: data,
+    docsUrl: data?.documentation_url,
+    resetAt: reset ? Number(reset) * 1000 : undefined,
+    retryAfterSeconds: retryAfterHeader ? Number(retryAfterHeader) : undefined,
+  });
+}
+
 export class GitHubClient {
   constructor(token) {
     this.token = token;
@@ -86,20 +113,8 @@ export class GitHubClient {
             await sleep(400 * attempt);
             continue;
           }
-          const remaining = res.headers.get('x-ratelimit-remaining');
-          const reset = res.headers.get('x-ratelimit-reset');
-          const isRateLimit =
-            res.status === 403 && remaining === '0' && (data?.message || '').toLowerCase().includes('rate limit');
-          const message =
-            data?.message ||
-            (isRateLimit ? 'GitHub API rate limit exceeded' : `GitHub returned HTTP ${res.status}`);
           clearTimeout(timer);
-          throw new GitHubError(res.status, message, {
-            code: isRateLimit ? 'rate_limited' : 'github_error',
-            body: data,
-            docsUrl: data?.documentation_url,
-            resetAt: reset ? Number(reset) * 1000 : undefined,
-          });
+          throw githubErrorFrom(res, data, { method, path });
         }
 
         clearTimeout(timer);
@@ -142,8 +157,16 @@ export class GitHubClient {
       },
     });
     if (!res.ok) {
-      const message = `GitHub returned HTTP ${res.status}`;
-      throw new GitHubError(res.status, message, { code: 'github_error' });
+      let payload = null;
+      const text = await res.text().catch(() => '');
+      if (text) {
+        try {
+          payload = JSON.parse(text);
+        } catch {
+          payload = null;
+        }
+      }
+      throw githubErrorFrom(res, payload, { method: 'GET', path: url });
     }
     const items = await res.json();
     const link = res.headers.get('link') || '';
@@ -152,6 +175,20 @@ export class GitHubClient {
   }
 
   // ---------------------------------------------------------------- identity
+
+  /** GET /rate_limit — remaining GitHub quota for this token. */
+  async rateLimit() {
+    const data = await this.request('GET', '/rate_limit');
+    const shape = (r) =>
+      r
+        ? { limit: r.limit, remaining: r.remaining, used: r.used, resetAt: new Date(r.reset * 1000).toISOString() }
+        : null;
+    return {
+      core: shape(data.resources?.core),
+      graphql: shape(data.resources?.graphql),
+      search: shape(data.resources?.search),
+    };
+  }
 
   async whoami() {
     const me = await this.request('GET', '/user');

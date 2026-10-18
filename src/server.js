@@ -75,6 +75,7 @@ app.use((err, req, res, _next) => {
   if (status >= 500) logger.error('unhandled error', { code, message: err.message, stack: err.stack });
   else logger.debug('request error', { code, message: err.message, status });
 
+  if (err.retryAfter) res.set('Retry-After', String(err.retryAfter));
   res.status(status).json({ error: { code, message, details: err.details } });
 });
 

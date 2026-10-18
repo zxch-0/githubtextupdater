@@ -198,3 +198,27 @@ test('malformed patch blocks are reported', () => {
   const unterminated = parseSpec('```py path=a.py action=patch\n<<<<<<< SEARCH\nx = 1\n=======\ny = 2\n```');
   assert.equal(unterminated.errors[0].code, 'invalid_patch');
 });
+
+test('front matter without its opening --- is reported instead of being dropped', () => {
+  const spec = ['pr_title: Hello', 'commit_message: hi', '---', '', '```js path=a.js', 'x', '```'].join('\n');
+  const { meta, warnings, errors, files } = parseSpec(spec);
+  assert.deepEqual(errors, []);
+  assert.equal(files.length, 1);
+  assert.deepEqual(meta, {}, 'the block is ignored, as before');
+  assert.equal(warnings[0].code, 'front_matter_missing_open');
+  assert.equal(warnings[0].line, 1);
+  assert.match(warnings[0].message, /opening "---" line is missing/);
+});
+
+test('no warning when the text simply starts with a fenced block', () => {
+  const { warnings } = parseSpec('```js path=a.js\nx\n```');
+  assert.deepEqual(warnings, []);
+});
+
+test('blank lines inside a pr_body block scalar are preserved', () => {
+  const spec = ['---', 'pr_title: t', 'pr_body: |', '  Line A', '', '  Line B', 'commit_message: c', '---', '', '```js path=a.js', 'x', '```'].join('\n');
+  const { meta } = parseSpec(spec);
+  assert.equal(meta.prTitle, 't');
+  assert.equal(meta.commitMessage, 'c');
+  assert.equal(meta.prBody, 'Line A\n\nLine B');
+});

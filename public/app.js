@@ -41,25 +41,103 @@ function debounce(fn, ms) {
   };
 }
 
-async function api(path, { method = 'GET', body } = {}) {
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+function stripTags(text) {
+  return String(text || '')
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+async function requestOnce(path, { method, body }) {
   const res = await fetch(path, {
     method,
     headers: body ? { 'Content-Type': 'application/json' } : {},
     body: body ? JSON.stringify(body) : undefined,
   });
+  const text = await res.text().catch(() => '');
   let data = null;
-  try {
-    data = await res.json();
-  } catch {
-    data = null;
+  if (text) {
+    try {
+      data = JSON.parse(text);
+    } catch {
+      data = null;
+    }
   }
-  if (!res.ok) {
-    const err = new Error(data?.error?.message || `Request failed (HTTP ${res.status})`);
-    err.code = data?.error?.code;
-    err.details = data?.error?.details;
-    throw err;
+  return { res, text, data };
+}
+
+/** Human readable failure, with the HTTP status, the endpoint and any body snippet. */
+function describeFailure({ res, text, data }, path, method) {
+  const where = `${method} ${path}`;
+  const serverMessage = data?.error?.message;
+  const retryAfter = res.headers.get('retry-after');
+  const snippet = serverMessage ? '' : stripTags(text).slice(0, 200);
+
+  if (res.status === 429) {
+    return `Too many requests (${where})${retryAfter ? ` — retry in ${retryAfter}s` : ''}. ${
+      serverMessage || 'Wait a minute and try again.'
+    }`.trim();
   }
-  return data;
+  if (res.status === 403) {
+    const proxyHint = /<html|<!doctype|cloudflare|render|suspend|forbidden/i.test(snippet)
+      ? ' This answer comes from your host (not the app): check that the Render service is running and not suspended.'
+      : ' Most likely: GitHub rate limit reached, token without write permission on this repo, or SSO not authorised.';
+    return (
+      `HTTP 403 on ${where}. ${serverMessage || 'GitHub refused the request.'}`.trim() +
+      proxyHint +
+      (snippet ? ` Response: "${snippet}"` : '')
+    );
+  }
+  if (res.status === 401) {
+    return `HTTP 401 on ${where} — the session is gone or the token was revoked. Reconnect in step 1.`;
+  }
+  if (res.status === 404) {
+    return `HTTP 404 on ${where}. ${serverMessage || 'Not found.'}`;
+  }
+  if (res.status >= 500) {
+    return `HTTP ${res.status} on ${where} — the server (or GitHub) is unavailable.${
+      snippet ? ` Response: "${snippet}"` : ''
+    } Retry in a few seconds.`;
+  }
+  return `Request failed (HTTP ${res.status} on ${where}). ${serverMessage || ''}${
+    snippet ? ` Response: "${snippet}"` : ''
+  }`.trim();
+}
+
+async function api(path, { method = 'GET', body } = {}) {
+  let last;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    last = await requestOnce(path, { method, body });
+    // 502/503/504 usually mean the Render instance is waking up: retry.
+    const wakeUp = [502, 503, 504].includes(last.res.status);
+    if (wakeUp && attempt < 2) {
+      await sleep(1500 * (attempt + 1));
+      continue;
+    }
+    break;
+  }
+
+  const { res, data } = last;
+  if (res.ok) return data;
+
+  if (res.status === 401 && path !== '/api/session') {
+    setUser(null);
+    showAlert(
+      $('#connect-error'),
+      'Your session expired or the token was revoked. Paste a GitHub token again in step 1.',
+    );
+  }
+
+  if (res.status === 403 || res.status === 429) loadQuota();
+
+  const err = new Error(describeFailure(last, path, method));
+  err.status = res.status;
+  err.code = data?.error?.code;
+  err.details = data?.error?.details;
+  throw err;
 }
 
 function showAlert(el, message, list) {
@@ -182,6 +260,34 @@ function setUser(user) {
     setUser(null);
   });
   setStepEnabled(2, true);
+  loadQuota();
+}
+
+/** Show the remaining GitHub quota — a 403 is most often an exhausted quota. */
+async function loadQuota() {
+  const el = $('#quota');
+  if (!state.user) {
+    el.hidden = true;
+    el.textContent = '';
+    return;
+  }
+  el.hidden = false;
+  el.innerHTML = '<span class="spinner"></span> Checking GitHub quota…';
+  try {
+    const data = await api('/api/rate-limit');
+    const core = data.limits?.core;
+    if (!core) {
+      el.hidden = true;
+      return;
+    }
+    const reset = new Date(core.resetAt).toLocaleTimeString();
+    el.innerHTML = `GitHub quota: <strong>${core.remaining}/${core.limit}</strong> requests left · resets at ${escapeHtml(
+      reset,
+    )} · <button class="btn ghost small" type="button" id="quota-refresh">Refresh</button>`;
+    $('#quota-refresh')?.addEventListener('click', loadQuota);
+  } catch (err) {
+    el.textContent = err.message;
+  }
 }
 
 $('#connect-form').addEventListener('submit', async (e) => {

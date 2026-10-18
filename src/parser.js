@@ -315,10 +315,17 @@ function parseFrontMatter(text) {
       commit();
       return { meta, rest: lines.slice(i + 1).join('\n'), consumedLines: i + 1 };
     }
-    const block = /^(\s+)(.*)$/.exec(line);
-    if (key && blockLines && block && line.trim() !== '') {
-      blockLines.push(block[2]);
-      continue;
+    if (key && blockLines) {
+      // A blank line inside a "key: |" block is part of the value.
+      if (line.trim() === '') {
+        blockLines.push('');
+        continue;
+      }
+      const block = /^(\s+)(.*)$/.exec(line);
+      if (block) {
+        blockLines.push(block[2]);
+        continue;
+      }
     }
     const kv = /^([A-Za-z_][\w-]*)\s*:\s*(.*)$/.exec(line);
     if (!kv) continue;
@@ -334,6 +341,29 @@ function parseFrontMatter(text) {
     }
   }
   return null; // unterminated front matter -> treat the whole paste as body
+}
+
+const META_KEY_LINE = /^(repo|repository|branch|base|pr_title|title|pr_body|body|description|commit_message|commit|message|draft)\s*:/i;
+
+/**
+ * A paste that starts with `pr_title:` and ends the block with `---` is a front
+ * matter whose opening delimiter was lost: everything in it is silently ignored,
+ * so warn instead of dropping it without a word.
+ */
+function detectUnopenedFrontMatter(text) {
+  const lines = text.split('\n').slice(0, 40);
+  const firstKey = lines.findIndex((line) => META_KEY_LINE.test(line));
+  if (firstKey === -1) return null;
+  const separator = lines.findIndex((line, index) => index > firstKey && /^-{3,}\s*$/.test(line));
+  if (separator === -1) return null;
+  return {
+    line: firstKey + 1,
+    code: 'front_matter_missing_open',
+    message:
+      'This looks like a front matter block (repo/branch/pr_title/pr_body/commit_message) but the opening "---" line is missing, so it is ignored. Add "---" on the very first line and keep the closing "---" (line ' +
+      (separator + 1) +
+      ').',
+  };
 }
 
 const META_KEYS = {
@@ -453,6 +483,9 @@ export function parseSpec(input) {
     body = fm.rest;
     lineOffset = fm.consumedLines;
     meta = normalizeMeta(fm.meta);
+  } else {
+    const fmWarning = detectUnopenedFrontMatter(text);
+    if (fmWarning) warnings.push(fmWarning);
   }
 
   const lines = body.split('\n');

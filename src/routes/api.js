@@ -121,6 +121,16 @@ router.delete(
   }),
 );
 
+/** Remaining GitHub quota for the connected token (helps diagnose 403/429). */
+router.get(
+  '/rate-limit',
+  requireAuth,
+  wrap(async (req, res) => {
+    const limits = await req.gh.rateLimit();
+    return res.json({ limits, checkedAt: new Date().toISOString() });
+  }),
+);
+
 // ----------------------------------------------------------------- repositories
 
 router.get(
