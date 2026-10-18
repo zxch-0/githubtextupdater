@@ -391,6 +391,80 @@ $('#insert-example').addEventListener('click', () => {
   insertAtCursor(EXAMPLE_SPEC);
 });
 
+// ------------------------------------------------- prompt to paste to an AI
+
+let aiPromptCache = null;
+
+function flash(btn, text) {
+  const previous = btn.textContent;
+  btn.textContent = text;
+  setTimeout(() => {
+    btn.textContent = previous;
+  }, 1800);
+}
+
+async function copyAiPrompt(btn) {
+  try {
+    if (!aiPromptCache) {
+      const res = await fetch('ai-prompt.txt');
+      if (!res.ok) throw new Error('prompt unavailable');
+      aiPromptCache = await res.text();
+    }
+    await navigator.clipboard.writeText(aiPromptCache);
+    flash(btn, 'Copied ✓');
+  } catch {
+    showPromptModal(aiPromptCache);
+  }
+}
+
+function showPromptModal(text) {
+  openModal({
+    title: 'Prompt for an AI',
+    renderBody: (m) => {
+      m.body.innerHTML = `
+        <p class="muted small">Copy this prompt, fill in <strong>CONTEXTE DE MON PROJET</strong> and
+        <strong>MA DEMANDE</strong>, send it to your AI, then paste its whole answer in the box below.
+        Only the fenced code blocks are used.</p>
+        <textarea class="input mono" id="prompt-text" rows="20" readonly></textarea>`;
+      const ta = m.body.querySelector('#prompt-text');
+      ta.value = text || 'Prompt unavailable (public/ai-prompt.txt).';
+      ta.focus();
+      ta.select();
+    },
+    footer: [
+      {
+        label: 'Select all',
+        onClick: (m) => {
+          const ta = m.body.querySelector('#prompt-text');
+          ta.focus();
+          ta.select();
+        },
+      },
+      {
+        label: 'Copy',
+        kind: 'primary',
+        onClick: async (m, btn) => {
+          const ta = m.body.querySelector('#prompt-text');
+          try {
+            await navigator.clipboard.writeText(ta.value);
+            flash(btn, 'Copied ✓');
+          } catch {
+            ta.focus();
+            ta.select();
+          }
+        },
+      },
+    ],
+  });
+}
+
+const aiPromptBtn = document.createElement('button');
+aiPromptBtn.className = 'btn ghost small';
+aiPromptBtn.type = 'button';
+aiPromptBtn.textContent = 'Copy AI prompt';
+aiPromptBtn.addEventListener('click', () => copyAiPrompt(aiPromptBtn));
+$('#insert-example').after(aiPromptBtn);
+
 const EXAMPLE_SPEC = [
   '```python path=src/mathx/ops.py action=upsert',
   '"""Math helpers."""',
@@ -930,5 +1004,5 @@ setStepEnabled(2, false);
 setStepEnabled(3, false);
 setStepEnabled(4, false);
 setStepEnabled(5, false);
-setStatus($('#spec-meta'), 'The block is analysed as you type.');
+setStatus($('#spec-meta'), 'Analysed as you type ·');
 loadSession();

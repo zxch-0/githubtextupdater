@@ -1,0 +1,69 @@
+Tu vas écrire du code pour mon dépôt GitHub.
+
+Ta réponse doit contenir UNIQUEMENT le bloc de texte au format ci-dessous, sans aucune phrase
+d'introduction, de conclusion ou d'explication : je vais coller ta réponse telle quelle dans un
+outil qui crée/modifie les fichiers, ouvre une pull request et la merge.
+
+FORMAT
+------
+Un bloc de code par fichier. Le chemin du fichier se trouve sur la ligne d'ouverture du bloc :
+
+```<langage> path=<chemin/dans/le-depot> action=<action>
+<contenu complet du fichier>
+```
+
+Exemple :
+
+```python path=src/mathx/ops.py action=upsert
+def add(a, b):
+    return a + b
+```
+
+RÈGLES
+------
+1. `path=` est OBLIGATOIRE et relatif à la racine du dépôt (`src/lib/utils.ts`).
+   Jamais de `/` au début, jamais de `../`, jamais de chemin absolu.
+2. `action=` (optionnel, défaut `upsert`) :
+   - `upsert`            : crée le fichier s'il n'existe pas, sinon remplace tout son contenu
+   - `create`            : le fichier ne doit pas encore exister
+   - `update`            : le fichier existe déjà et tu réécris tout son contenu
+   - `append` / `prepend`: ajoute le bloc à la fin / au début du fichier existant
+   - `patch`             : modifie un fichier existant avec un ou plusieurs blocs search/replace
+   - `delete`            : supprime le fichier (le corps du bloc est ignoré)
+3. Pour `action=patch`, le corps du bloc est :
+     <<<<<<< SEARCH
+     <les lignes EXACTES présentes dans le fichier, indentation comprise>
+     =======
+     <les nouvelles lignes>
+     >>>>>>> REPLACE
+   Le bloc SEARCH doit exister tel quel et n'apparaître qu'une seule fois, sinon l'outil refuse.
+   Un bloc REPLACE vide supprime ces lignes. Plusieurs sections SEARCH/REPLACE peuvent s'enchaîner
+   dans un même bloc.
+4. Écris TOUJOURS le contenu COMPLET et fonctionnel de chaque fichier.
+   Interdits : « ... », « // reste du code », « (inchangé) », tout placeholder.
+5. Un fichier = un bloc. Aucun chemin en double. Aucun texte en dehors des blocs.
+6. Optionnel, tout en haut de ta réponse, tu peux ajouter :
+     ---
+     pr_title: <titre de la pull request>
+     pr_body: |
+       <description en markdown>
+     commit_message: <message de commit>
+     ---
+7. Options utiles sur la ligne d'ouverture : `exec` ou `mode=755` pour rendre un script exécutable.
+
+CONTEXTE DE MON PROJET
+----------------------
+- Dépôt :
+- Stack (langage, framework, versions) :
+- Branche de base : main
+- Arborescence / fichiers concernés :
+- Contraintes (style, conventions, dépendances autorisées) :
+
+MA DEMANDE
+----------
+- Objectif :
+- Fichiers à créer :
+- Fichiers existants à modifier, et ce qui doit changer :
+- Comportement attendu / comment vérifier :
+
+Réponds uniquement avec le bloc de texte au format demandé.

@@ -216,6 +216,20 @@ echo "deploying"
 
 ---
 
+## Getting the code from an AI
+
+`public/ai-prompt.txt` (also available from the **“Copy AI prompt”** button in step 3) is a ready-made
+prompt you can paste to ChatGPT/Claude/Gemini: it forces the model to answer **only** with blocks in
+the expected format, so the answer can be pasted straight into the tool.
+
+`prompts/ai-request.md` documents it, with a filled-in example (Next.js health endpoint + hook +
+component + patch of an existing layout) and the exact answer the AI should produce.
+
+Typical loop: **Copy AI prompt → fill in the project context and the request → paste the AI answer in
+step 3 → uncheck what you do not want → Commit → Open PR → Merge.**
+
+---
+
 ## HTTP API
 
 | Method | Route | Purpose |
