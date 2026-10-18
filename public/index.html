@@ -1,0 +1,250 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex" />
+    <title>GitHub Text Updater</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ctext y='13' font-size='13'%3E%E2%9C%8F%3C/text%3E%3C/svg%3E" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <svg viewBox="0 0 16 16" width="26" height="26" aria-hidden="true" class="brand-mark">
+          <path
+            fill="currentColor"
+            d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.4 7.4 0 0 1 2-.27c.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A7.99 7.99 0 0 0 16 8c0-4.42-3.58-8-8-8Z"
+          />
+        </svg>
+        <div class="brand-text">
+          <strong>GitHub Text Updater</strong>
+          <span>Paste a file block &rarr; commit it &rarr; open the PR &rarr; merge.</span>
+        </div>
+      </div>
+      <div id="session-pill" class="pill pill-muted">Not connected</div>
+    </header>
+
+    <main class="steps">
+      <!-- ------------------------------------------------------------ step 1 -->
+      <section class="card" id="step-1">
+        <div class="card-head">
+          <span class="step-num">1</span>
+          <h2>Connect your GitHub account</h2>
+        </div>
+        <fieldset class="step-fields">
+          <div class="card-body">
+            <p class="muted">
+              Paste a personal access token. It is stored encrypted in an httpOnly cookie on this server and is never
+              sent to the browser again.
+            </p>
+            <form id="connect-form" class="row">
+              <input
+                id="token"
+                class="input mono"
+                type="password"
+                placeholder="ghp_… or github_pat_…"
+                autocomplete="off"
+                spellcheck="false"
+              />
+              <button class="btn primary" type="submit" id="connect-btn">Connect</button>
+            </form>
+            <p id="connect-error" class="alert alert-error" hidden></p>
+            <details class="help">
+              <summary>Which token do I need?</summary>
+              <ul>
+                <li>
+                  <strong>Fine-grained token</strong> (recommended): <em>Repository access</em> = the repos you want,
+                  permissions <em>Contents: read &amp; write</em>, <em>Pull requests: read &amp; write</em>,
+                  <em>Metadata: read-only</em>.
+                </li>
+                <li><strong>Classic token</strong>: scope <code>repo</code> (and <code>workflow</code> if you edit GitHub Actions files).</li>
+                <li>Create one at <span class="mono">github.com → Settings → Developer settings → Personal access tokens</span>.</li>
+              </ul>
+            </details>
+          </div>
+        </fieldset>
+      </section>
+
+      <!-- ------------------------------------------------------------ step 2 -->
+      <section class="card" id="step-2">
+        <div class="card-head">
+          <span class="step-num">2</span>
+          <h2>Choose the repository and the branch</h2>
+        </div>
+        <fieldset class="step-fields" disabled>
+          <div class="card-body">
+            <div class="row wrap">
+              <input id="repo-input" class="input mono grow" list="repo-list" placeholder="owner/repository" spellcheck="false" />
+              <button class="btn" type="button" id="load-repos">Browse my repos</button>
+            </div>
+            <datalist id="repo-list"></datalist>
+            <p id="repo-status" class="muted small" hidden></p>
+            <div class="grid-2">
+              <label class="field">
+                <span>Base branch (target of the PR)</span>
+                <select id="base-branch" class="input"></select>
+              </label>
+              <label class="field">
+                <span>New branch to create</span>
+                <input id="head-branch" class="input mono" placeholder="text-updater/2026-01-01-1200" spellcheck="false" />
+              </label>
+            </div>
+            <p id="repo-error" class="alert alert-error" hidden></p>
+          </div>
+        </fieldset>
+      </section>
+
+      <!-- ------------------------------------------------------------ step 3 -->
+      <section class="card" id="step-3">
+        <div class="card-head">
+          <span class="step-num">3</span>
+          <h2>Paste your file block</h2>
+          <button class="btn ghost small" type="button" id="toggle-syntax">Syntax help</button>
+        </div>
+        <fieldset class="step-fields" disabled>
+          <div class="card-body">
+            <div id="syntax-help" class="syntax-help" hidden>
+              <p>One fenced code block per file. The path lives in the info string of the fence:</p>
+              <pre class="code-block">```python path=src/mathx/ops.py action=upsert
+def add(a, b):
+    return a + b
+```</pre>
+              <ul class="small">
+                <li>
+                  <code>path=</code> (required; aliases <code>file=</code>, <code>src=</code>, <code>title=</code>, or just the bare
+                  path as the first word).
+                </li>
+                <li>
+                  <code>action=</code> (optional): <code>upsert</code> (default), <code>create</code>, <code>update</code>,
+                  <code>append</code>, <code>prepend</code>, <code>delete</code>.
+                </li>
+                <li><code>exec</code> or <code>mode=755</code> (optional) to make a new file executable.</li>
+                <li>The language is taken from the fence, otherwise guessed from the file extension (cosmetic only).</li>
+                <li>
+                  Optional front matter at the very top:
+                  <code>repo:</code>, <code>branch:</code>, <code>pr_title:</code>, <code>pr_body:</code>,
+                  <code>commit_message:</code>, <code>draft:</code>.
+                </li>
+              </ul>
+            </div>
+
+            <div class="row wrap toolbar">
+              <button class="btn ghost small" type="button" id="insert-example">Insert an example</button>
+              <button class="btn ghost small" type="button" id="clear-spec">Clear</button>
+              <span class="spacer"></span>
+              <span id="spec-meta" class="muted small"></span>
+              <span class="muted small">Need code from an AI? Use “Copy AI prompt”.</span>
+            </div>
+
+            <textarea
+              id="spec-text"
+              class="input mono spec"
+              rows="16"
+              spellcheck="false"
+              placeholder="```python path=src/mathx/ops.py&#10;def add(a, b):&#10;    return a + b&#10;```"
+            ></textarea>
+
+            <div class="row wrap">
+              <button class="btn primary" type="button" id="analyze-btn">Analyse the block</button>
+              <span id="analyze-status" class="muted small"></span>
+            </div>
+
+            <div id="parse-errors" class="alert alert-error" hidden></div>
+            <div id="parse-warnings" class="alert alert-warn" hidden></div>
+
+            <div id="plan-wrap" hidden>
+              <div class="plan-head">
+                <h3>Plan</h3>
+                <div id="plan-summary" class="badges"></div>
+              </div>
+              <div id="plan-list" class="plan-list"></div>
+              <label class="field">
+                <span>Commit message</span>
+                <input id="commit-message" class="input" placeholder="feat: add math helpers" />
+              </label>
+              <div class="row wrap">
+                <button class="btn primary" type="button" id="commit-btn">Commit to branch</button>
+                <span id="commit-status" class="muted small"></span>
+              </div>
+            </div>
+          </div>
+        </fieldset>
+      </section>
+
+      <!-- ------------------------------------------------------------ step 4 -->
+      <section class="card" id="step-4">
+        <div class="card-head">
+          <span class="step-num">4</span>
+          <h2>Open the pull request</h2>
+        </div>
+        <fieldset class="step-fields" disabled>
+          <div class="card-body">
+            <div id="commit-result" class="alert alert-ok" hidden></div>
+            <label class="field">
+              <span>Title</span>
+              <input id="pr-title" class="input" placeholder="Add math helpers" />
+            </label>
+            <label class="field">
+              <span>Body (markdown)</span>
+              <textarea id="pr-body" class="input mono" rows="8"></textarea>
+            </label>
+            <label class="check">
+              <input type="checkbox" id="pr-draft" />
+              <span>Open as a draft</span>
+            </label>
+            <div class="row wrap">
+              <button class="btn primary" type="button" id="pr-btn">Open the pull request</button>
+              <span id="pr-status" class="muted small"></span>
+            </div>
+            <p id="pr-error" class="alert alert-error" hidden></p>
+          </div>
+        </fieldset>
+      </section>
+
+      <!-- ------------------------------------------------------------ step 5 -->
+      <section class="card" id="step-5">
+        <div class="card-head">
+          <span class="step-num">5</span>
+          <h2>Merge</h2>
+          <button class="btn ghost small" type="button" id="refresh-pr">Refresh status</button>
+        </div>
+        <fieldset class="step-fields" disabled>
+          <div class="card-body">
+            <div id="pr-card" class="pr-card" hidden></div>
+            <div class="grid-2">
+              <label class="field">
+                <span>Merge method</span>
+                <select id="merge-method" class="input">
+                  <option value="merge">Merge commit</option>
+                  <option value="squash">Squash and merge</option>
+                  <option value="rebase">Rebase and merge</option>
+                </select>
+              </label>
+              <label class="field">
+                <span>Commit title (optional)</span>
+                <input id="merge-title" class="input" placeholder="Leave empty for the default" />
+              </label>
+            </div>
+            <label class="check">
+              <input type="checkbox" id="delete-branch" checked />
+              <span>Delete the branch after merging</span>
+            </label>
+            <div class="row wrap">
+              <button class="btn primary" type="button" id="merge-btn">Merge the pull request</button>
+              <span id="merge-status" class="muted small"></span>
+            </div>
+            <div id="merge-result" class="alert alert-ok" hidden></div>
+            <p id="merge-error" class="alert alert-error" hidden></p>
+          </div>
+        </fieldset>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <span>Runs entirely on your Render instance · the token never leaves the server · <a href="/healthz">health</a></span>
+    </footer>
+
+    <script type="module" src="app.js"></script>
+  </body>
+</html>
