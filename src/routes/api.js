@@ -427,12 +427,20 @@ router.post(
       pr = await req.gh.createPullRequest(owner, repo, { title, body, head, base, draft });
     } catch (err) {
       if (err.status === 422) {
-        const existing = await req.gh.findOpenPullRequest(owner, repo, head, base);
+        // A closed PR blocks the creation just as much as an open one, and
+        // GitHub only answers "Validation Failed" — look for both.
+        const existing = await req.gh.findPullRequest(owner, repo, head, base, { state: 'all' });
         if (existing) {
+          const merged = Boolean(existing.merged_at || existing.merged);
+          const closed = existing.state === 'closed';
           return res.json({
             alreadyExists: true,
             pullRequest: shapePullRequest(existing),
-            message: 'An open pull request already exists for this branch.',
+            message: merged
+              ? `Pull request #${existing.number} already exists for "${head}" and is already merged.`
+              : closed
+                ? `Pull request #${existing.number} already exists for "${head}" but it is closed. Reopen it on GitHub, or delete that branch and commit to a new branch name.`
+                : 'An open pull request already exists for this branch.',
           });
         }
       }

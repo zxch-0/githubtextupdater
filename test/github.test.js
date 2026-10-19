@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { GitHubError, toAppError } from '../src/errors.js';
-import { GitHubClient } from '../src/github.js';
+import { formatApiErrors, GitHubClient } from '../src/github.js';
 
 /** Replace globalThis.fetch for the duration of a test. */
 function withFetch(handler, fn) {
@@ -182,6 +182,60 @@ test('a plain 403 stays a 403 with the friendly wording', async () => {
       const app = toAppError(thrown);
       assert.equal(app.status, 403);
       assert.match(app.message, /Contents.+Pull requests|permissions/);
+    },
+  );
+});
+
+test('formatApiErrors turns GitHub error arrays into readable sentences', () => {
+  assert.deepEqual(formatApiErrors(undefined), []);
+  assert.deepEqual(
+    formatApiErrors([{ resource: 'PullRequest', code: 'custom', message: 'No commits between main and feat' }]),
+    ['No commits between main and feat'],
+  );
+  assert.deepEqual(formatApiErrors([{ resource: 'PullRequest', field: 'base', code: 'invalid' }]), [
+    'PullRequest "base" is invalid (invalid)',
+  ]);
+  assert.deepEqual(formatApiErrors([{ message: 'a' }, { message: 'a' }, { message: 'b' }]), ['a', 'b']);
+});
+
+test('a 422 keeps its field errors instead of a bare "Validation Failed"', async () => {
+  await withFetch(
+    () =>
+      new Response(
+        JSON.stringify({
+          message: 'Validation Failed',
+          errors: [
+            { resource: 'PullRequest', code: 'custom', message: 'No commits between acme:main and acme:feat' },
+          ],
+        }),
+        { status: 422, headers: { 'content-type': 'application/json' } },
+      ),
+    async () => {
+      const client = new GitHubClient('ghp_testtoken');
+      let thrown = null;
+      try {
+        await client.createPullRequest('acme', 'widgets', { title: 't', body: '', head: 'feat', base: 'main' });
+      } catch (err) {
+        thrown = err;
+      }
+      assert.ok(thrown instanceof GitHubError);
+      assert.equal(thrown.status, 422);
+      assert.match(thrown.message, /^Validation Failed: No commits between acme:main and acme:feat$/);
+      const app = toAppError(thrown);
+      assert.equal(app.status, 400);
+      assert.match(app.message, /No commits between acme:main and acme:feat/);
+    },
+  );
+});
+
+test('findPullRequest can look for closed pull requests too', async () => {
+  await withFetch(
+    () => jsonResponse([{ number: 12, state: 'closed', title: 'old', html_url: 'https://x/12' }]),
+    async (calls) => {
+      const client = new GitHubClient('ghp_testtoken');
+      const found = await client.findPullRequest('acme', 'widgets', 'feat', 'main', { state: 'all' });
+      assert.equal(found.number, 12);
+      assert.match(calls[0].url, /state=all/);
     },
   );
 });

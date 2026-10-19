@@ -38,6 +38,35 @@ export async function mapLimit(items, limit, worker) {
   return results;
 }
 
+/**
+ * GitHub hides the useful part of a 422 inside `errors[]`
+ * ({"message":"Validation Failed","errors":[{"message":"No commits between main and x"}]}).
+ * Surface it, otherwise the UI can only print "Validation Failed".
+ */
+export function formatApiErrors(errors) {
+  if (!Array.isArray(errors)) return [];
+  const out = [];
+  for (const entry of errors) {
+    if (typeof entry === 'string') {
+      out.push(entry);
+      continue;
+    }
+    if (!entry || typeof entry !== 'object') continue;
+    if (entry.message) {
+      out.push(String(entry.message));
+      continue;
+    }
+    const where = entry.field
+      ? `${entry.resource ? `${entry.resource} ` : ''}"${entry.field}"`
+      : entry.resource
+        ? String(entry.resource)
+        : '';
+    if (!where) continue;
+    out.push(`${where} is invalid${entry.code ? ` (${entry.code})` : ''}`);
+  }
+  return [...new Set(out)].slice(0, 4);
+}
+
 /** Build the GitHubError for a non-2xx response (shared by request()/requestPage()). */
 function githubErrorFrom(res, data, { method, path }) {
   const remaining = res.headers.get('x-ratelimit-remaining');
@@ -51,8 +80,10 @@ function githubErrorFrom(res, data, { method, path }) {
       lowerMessage.includes('secondary rate limit') ||
       lowerMessage.includes('abuse detection') ||
       Boolean(retryAfterHeader));
-  const message =
+  const headline =
     data?.message || (isRateLimit ? 'GitHub API rate limit exceeded' : `GitHub returned HTTP ${res.status}`);
+  const details = formatApiErrors(data?.errors);
+  const message = details.length ? `${headline}: ${details.join(' · ')}` : headline;
   if (res.status === 403) {
     logger.warn('github 403', { method, path, message, isRateLimit, remaining });
   }
@@ -322,14 +353,19 @@ export class GitHubClient {
     });
   }
 
-  async findOpenPullRequest(owner, name, head, base) {
+  /** `state` is "open" (default), "closed" or "all" — a 422 can hide an already closed PR. */
+  async findPullRequest(owner, name, head, base, { state = 'open' } = {}) {
     const pulls = await this.request(
       'GET',
       `/repos/${owner}/${name}/pulls?head=${encodeURIComponent(`${owner}:${head}`)}&base=${encodeURIComponent(
         base,
-      )}&state=open&per_page=5`,
+      )}&state=${encodeURIComponent(state)}&per_page=5`,
     );
     return Array.isArray(pulls) && pulls.length ? pulls[0] : null;
+  }
+
+  async findOpenPullRequest(owner, name, head, base) {
+    return this.findPullRequest(owner, name, head, base, { state: 'open' });
   }
 
   async getPullRequest(owner, name, number) {
