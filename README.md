@@ -20,9 +20,14 @@ def add(a, b):
    - *fine-grained* : accès au dépôt + **Contents: read & write**, **Pull requests: read & write**, **Metadata: read-only**
    - ou *classic* : scope `repo` (+ `workflow` si vous modifiez des fichiers `.github/workflows/`).
 3. **Choisir le dépôt** (menu de recherche ou `owner/name`) et la branche de base.
-4. **Coller le bloc de texte** (voir le format ci-dessous). L'outil analyse en direct et affiche le diff
+4. **Coller le bloc de texte** (voir le format ci-dessous). Le bloc est vérifié **dans votre navigateur**
+   (erreurs et avertissements immédiats, sans appel réseau), puis analysé côté serveur qui affiche le diff
    fichier par fichier.
 5. **Commit → Open pull request → Merge** (bouton manuel, avec *merge / squash / rebase*).
+
+> **Si l'analyse échoue**, le message dit toujours pourquoi : statut HTTP, route appelée, extrait de la
+> réponse (quota GitHub épuisé, token sans accès en écriture, instance Render en train de démarrer…).
+> Aucun « Analysis failed » sans explication.
 
 Le token est chiffré (AES-256-GCM) dans un cookie `httpOnly` côté serveur : il ne retourne jamais au navigateur.
 

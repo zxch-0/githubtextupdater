@@ -1,5 +1,9 @@
 /* GitHub Text Updater — front-end (vanilla ESM, no build step). */
 
+// The very same parser the server uses: it only relies on APIs that exist in
+// browsers, so the block is validated locally (no token, no network, instant).
+import { parseSpec } from '/lib/parser.js';
+
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => Array.from(document.querySelectorAll(sel));
 
@@ -20,6 +24,7 @@ const state = {
   commit: null,
   pr: null,
   treeCache: null,
+  analysedHash: null, // last (repo, base, branch, text) sent to /api/plan
 };
 
 // ------------------------------------------------------------------ helpers
@@ -108,16 +113,34 @@ function describeFailure({ res, text, data }, path, method) {
 }
 
 async function api(path, { method = 'GET', body } = {}) {
-  let last;
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    last = await requestOnce(path, { method, body });
+  let last = null;
+  let networkError = null;
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    try {
+      last = await requestOnce(path, { method, body });
+      networkError = null;
+    } catch (err) {
+      // fetch() itself failed: no answer at all. On a free Render instance that
+      // is almost always a cold start, so wait a little and try again.
+      networkError = err;
+      if (attempt < 3) {
+        await sleep(2000 * (attempt + 1));
+        continue;
+      }
+    }
     // 502/503/504 usually mean the Render instance is waking up: retry.
-    const wakeUp = [502, 503, 504].includes(last.res.status);
-    if (wakeUp && attempt < 2) {
-      await sleep(1500 * (attempt + 1));
+    if (last && [502, 503, 504].includes(last.res.status) && attempt < 3) {
+      await sleep(2000 * (attempt + 1));
       continue;
     }
     break;
+  }
+
+  if (!last) {
+    const reason = networkError?.message ? ` (${networkError.message})` : '';
+    throw new Error(
+      `The server did not answer ${method} ${path}${reason}. Your instance is probably waking up: wait a few seconds and try again.`,
+    );
   }
 
   const { res, data } = last;
@@ -469,13 +492,70 @@ function openRepoMenu() {
 
 const specEl = $('#spec-text');
 specEl.value = localStorage.getItem(LS.spec) || '';
+
+const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+
+/**
+ * Parse the block in the browser. Works even when the server cannot be reached,
+ * and stops us from calling /api/plan with a block that cannot parse anyway.
+ */
+function localParse() {
+  const text = specEl.value;
+  if (!text.trim()) {
+    clearAlert($('#parse-errors'));
+    clearAlert($('#parse-warnings'));
+    return null;
+  }
+  const parsed = parseSpec(text);
+  showAlert(
+    $('#parse-errors'),
+    parsed.errors.length ? 'Fix these errors before committing:' : '',
+    parsed.errors.map((e) => `Line ${e.line}: ${e.message}`),
+  );
+  showAlert(
+    $('#parse-warnings'),
+    parsed.warnings.length ? 'Warnings:' : '',
+    parsed.warnings.map((w) => `Line ${w.line}: ${w.message}`),
+  );
+  setStatus(
+    $('#spec-meta'),
+    `${plural(parsed.files.length, 'file')} · ${plural(parsed.errors.length, 'error')} · ${plural(
+      parsed.warnings.length,
+      'warning',
+    )} · checked in your browser`,
+  );
+  return parsed;
+}
+
+const localParseSoon = debounce(() => {
+  const parsed = localParse();
+  if (!parsed || parsed.errors.length > 0) {
+    state.plan = null;
+    state.analysedHash = null;
+    $('#plan-wrap').hidden = true;
+    setStatus($('#analyze-status'), parsed ? 'Fix the errors above, then analyse.' : '');
+    return;
+  }
+  scheduleRemoteAnalyse();
+}, 250);
+
 specEl.addEventListener('input', () => {
   localStorage.setItem(LS.spec, specEl.value);
   setStatus($('#analyze-status'), 'Unanalysed changes…');
-  debouncedAnalyse();
+  localParseSoon();
 });
 
-const debouncedAnalyse = debounce(() => analyse({ silent: true }), 800);
+const debouncedAnalyse = debounce(() => analyse({ silent: true }), 1500);
+
+/**
+ * Never ask the server twice for the same thing: the auto-analysis used to fire
+ * a POST on every pause while typing, which trips the write rate limiter.
+ */
+function scheduleRemoteAnalyse() {
+  const hash = [state.repo?.fullName || '', state.base, $('#head-branch').value.trim(), specEl.value].join('\u0000');
+  if (hash === state.analysedHash) return;
+  debouncedAnalyse();
+}
 
 $('#toggle-syntax').addEventListener('click', () => {
   const help = $('#syntax-help');
@@ -748,9 +828,10 @@ async function analyse({ silent = false } = {}) {
     return;
   }
   const statusEl = $('#analyze-status');
-  setStatus(statusEl, 'Analysing…', true);
+  if (!silent) setStatus(statusEl, 'Analysing…', true);
   clearAlert($('#parse-errors'));
   clearAlert($('#parse-warnings'));
+  state.analysedHash = [state.repo?.fullName || '', state.base, $('#head-branch').value.trim(), specEl.value].join('\u0000');
   try {
     const data = await api('/api/plan', {
       method: 'POST',
@@ -798,8 +879,10 @@ async function analyse({ silent = false } = {}) {
   } catch (err) {
     state.plan = null;
     $('#plan-wrap').hidden = true;
-    if (!silent) showAlert($('#parse-errors'), err.message);
-    setStatus(statusEl, 'Analysis failed');
+    // Never hide the reason: an opaque "Analysis failed" is what makes a 403 or
+    // a rate limit look like a broken block.
+    showAlert($('#parse-errors'), err.message);
+    setStatus(statusEl, 'Analysis failed — see the message above');
   }
 }
 
@@ -1111,4 +1194,5 @@ setStepEnabled(3, false);
 setStepEnabled(4, false);
 setStepEnabled(5, false);
 setStatus($('#spec-meta'), 'Analysed as you type ·');
+if (specEl.value.trim()) localParse();
 loadSession();

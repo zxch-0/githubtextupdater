@@ -40,6 +40,12 @@ app.get(['/healthz', '/api/health'], (_req, res) => {
   res.json({ ok: true, service: 'github-text-updater', uptime: Math.round(process.uptime()) });
 });
 
+// The parser only uses APIs that exist in browsers too, so the front-end reuses
+// it to validate the block locally instead of waiting for a server round trip.
+app.get('/lib/parser.js', (_req, res) => {
+  res.type('application/javascript').sendFile(path.join(__dirname, 'parser.js'));
+});
+
 app.use('/api', rateLimit({ windowMs: config.rateLimit.windowMs, max: config.rateLimit.max }));
 app.use(
   '/api',
