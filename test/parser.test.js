@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import { inferLanguage, normalizeLanguage, normalizeRepoPath, parseSpec } from '../src/parser.js';
 
@@ -221,4 +222,19 @@ test('blank lines inside a pr_body block scalar are preserved', () => {
   assert.equal(meta.prTitle, 't');
   assert.equal(meta.commitMessage, 'c');
   assert.equal(meta.prBody, 'Line A\n\nLine B');
+});
+
+test('the parser stays importable from a browser (no Node-only API)', async () => {
+  // public/app.js imports this exact file to validate the block locally, so it
+  // must not rely on Buffer / process / require.
+  const source = await readFile(new URL('../src/parser.js', import.meta.url), 'utf8');
+  assert.doesNotMatch(source, /\bBuffer\b/, 'src/parser.js uses Buffer: the front-end cannot import it');
+  assert.doesNotMatch(source, /\bprocess\./, 'src/parser.js uses process: the front-end cannot import it');
+  assert.doesNotMatch(source, /\brequire\(/, 'src/parser.js uses require: the front-end cannot import it');
+  assert.doesNotMatch(source, /\b__dirname\b/, 'src/parser.js uses __dirname: the front-end cannot import it');
+});
+
+test('byte size is the utf-8 length, not the character count', () => {
+  const { files } = parseSpec(['```md path=a.md', 'héllo', '```'].join('\n'));
+  assert.equal(files[0].size, 7, 'héllo\n is 6 characters but 7 bytes in utf-8');
 });

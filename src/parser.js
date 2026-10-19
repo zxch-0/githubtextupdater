@@ -22,6 +22,19 @@
 
 const FENCE_RE = /^( {0,3})(`{3,}|~{3,})[ \t]*([^\n`]*)$/;
 
+/**
+ * UTF-8 length of a string. `TextEncoder` exists in Node and in every browser,
+ * so this module stays importable from the front-end: the UI parses the block
+ * locally (instant feedback) without waiting for a server round trip.
+ */
+let sharedEncoder = null;
+
+function byteLength(text) {
+  if (typeof TextEncoder === 'undefined') return String(text ?? '').length;
+  if (!sharedEncoder) sharedEncoder = new TextEncoder();
+  return sharedEncoder.encode(String(text ?? '')).length;
+}
+
 export const ACTIONS = {
   upsert: 'upsert', // create if missing, replace if present (default)
   create: 'create', // fail if the file already exists
@@ -634,7 +647,7 @@ export function parseSpec(input) {
       content: action === 'delete' || action === 'patch' ? '' : content,
       rawContent: content,
       patch,
-      size: Buffer.byteLength(action === 'delete' ? '' : content, 'utf8'),
+      size: byteLength(action === 'delete' ? '' : content),
       line: openLine,
       info,
     });
